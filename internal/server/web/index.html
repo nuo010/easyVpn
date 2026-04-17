@@ -216,6 +216,7 @@
             <tr>
               <th>用户</th>
               <th>节点</th>
+              <th>虚拟 IP</th>
               <th>状态</th>
               <th>模式</th>
               <th>最后心跳</th>
@@ -247,8 +248,8 @@
         <label for="dns">DNS</label>
         <textarea id="dns" placeholder="每行一个 DNS 地址，例如 1.1.1.1"></textarea>
 
-        <label for="clientAddress">客户端虚拟地址</label>
-        <input id="clientAddress" placeholder="例如 10.200.0.2/24">
+        <label for="clientAddress">客户端虚拟地址（可选固定值）</label>
+        <input id="clientAddress" placeholder="留空时由服务端自动分配，例如 10.200.0.2/24">
 
         <label for="serverAddress">服务端虚拟地址</label>
         <input id="serverAddress" placeholder="例如 10.200.0.1">
@@ -296,6 +297,7 @@
         tr.innerHTML = `
           <td>${peer.username || '-'}</td>
           <td>${peer.name}</td>
+          <td><code>${peer.policy?.tunnel?.client_address || '-'}</code></td>
           <td><span class="badge ${peer.status === 'stale' ? 'stale' : ''}">${peer.status}</span></td>
           <td>${peer.policy.mode}</td>
           <td>${new Date(peer.last_seen_at).toLocaleString()}</td>

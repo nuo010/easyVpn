@@ -10,27 +10,33 @@ import (
 )
 
 type ServerConfig struct {
-	Listen         string         `json:"listen"`
-	AdminBind      string         `json:"admin_bind"`
-	AdminToken     string         `json:"admin_token"`
-	EnableTunnel   bool           `json:"enable_tunnel"`
-	PublicDataAddr string         `json:"public_data_addr"`
-	TunnelName     string         `json:"tunnel_name"`
-	TunnelAddress  string         `json:"tunnel_address"`
-	TunnelMTU      int            `json:"tunnel_mtu"`
-	Users          []control.User `json:"users"`
+	Listen          string         `json:"listen"`
+	AdminBind       string         `json:"admin_bind"`
+	AdminToken      string         `json:"admin_token"`
+	EnableTunnel    bool           `json:"enable_tunnel"`
+	DataTLSEnabled  bool           `json:"data_tls"`
+	DataTLSCertFile string         `json:"data_tls_cert_file"`
+	DataTLSKeyFile  string         `json:"data_tls_key_file"`
+	PublicDataAddr  string         `json:"public_data_addr"`
+	TunnelName      string         `json:"tunnel_name"`
+	TunnelAddress   string         `json:"tunnel_address"`
+	TunnelMTU       int            `json:"tunnel_mtu"`
+	Users           []control.User `json:"users"`
 }
 
 type ClientConfig struct {
-	ServerURL         string        `json:"server_url"`
-	Username          string        `json:"username"`
-	Password          string        `json:"password"`
-	NodeName          string        `json:"node_name"`
-	EnableTunnel      bool          `json:"enable_tunnel"`
-	TunnelName        string        `json:"tunnel_name"`
-	ApplySystemRoutes bool          `json:"apply_system_routes"`
-	PollInterval      time.Duration `json:"poll_interval"`
-	HeartbeatInterval time.Duration `json:"heartbeat_interval"`
+	ServerURL                 string        `json:"server_url"`
+	Username                  string        `json:"username"`
+	Password                  string        `json:"password"`
+	NodeName                  string        `json:"node_name"`
+	EnableTunnel              bool          `json:"enable_tunnel"`
+	TunnelName                string        `json:"tunnel_name"`
+	ApplySystemRoutes         bool          `json:"apply_system_routes"`
+	DataTLSCAFile             string        `json:"data_tls_ca_file"`
+	DataTLSServerName         string        `json:"data_tls_server_name"`
+	DataTLSInsecureSkipVerify bool          `json:"data_tls_insecure_skip_verify"`
+	PollInterval              time.Duration `json:"poll_interval"`
+	HeartbeatInterval         time.Duration `json:"heartbeat_interval"`
 }
 
 func LoadServerConfig(path string) (ServerConfig, error) {

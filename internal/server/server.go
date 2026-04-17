@@ -24,8 +24,13 @@ type Server struct {
 	dataPlane *DataPlane
 }
 
-func New(cfg config.ServerConfig) *Server {
-	store := NewStore(cfg.Users)
+func New(cfg config.ServerConfig) (*Server, error) {
+	allocator, err := NewIPAllocator(cfg.TunnelAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	store := NewStore(cfg.Users, allocator, allocator.ServerAddress(), cfg.TunnelMTU)
 	srv := &Server{
 		cfg:   cfg,
 		store: store,
@@ -33,7 +38,7 @@ func New(cfg config.ServerConfig) *Server {
 	if cfg.EnableTunnel {
 		srv.dataPlane = NewDataPlane(cfg, store)
 	}
-	return srv
+	return srv, nil
 }
 
 func (s *Server) Run() error {
@@ -91,6 +96,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"peer_count":    len(s.store.ListPeers()),
 		"enable_tunnel": s.cfg.EnableTunnel,
 		"data_addr":     s.advertisedDataAddr(nil),
+		"data_tls":      s.cfg.DataTLSEnabled,
 		"time":          time.Now().UTC(),
 	})
 }
@@ -117,14 +123,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, peer, sessionToken := s.store.LoginClient(req.Username, req.NodeName)
+	_, peer, sessionToken, err := s.store.LoginClient(req.Username, req.NodeName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	writeJSON(w, http.StatusOK, control.LoginResponse{
 		PeerID:       peer.ID,
 		SessionToken: sessionToken,
 		Username:     user.Username,
 		Policy:       peer.Policy,
 		Transport: control.TransportInfo{
-			DataAddr: s.advertisedDataAddr(r),
+			DataAddr:   s.advertisedDataAddr(r),
+			TLSEnabled: s.cfg.DataTLSEnabled,
 		},
 	})
 }
@@ -151,7 +162,8 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		PeerID: peer.ID,
 		Policy: peer.Policy,
 		Transport: control.TransportInfo{
-			DataAddr: s.advertisedDataAddr(r),
+			DataAddr:   s.advertisedDataAddr(r),
+			TLSEnabled: s.cfg.DataTLSEnabled,
 		},
 	})
 }

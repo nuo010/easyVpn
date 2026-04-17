@@ -20,7 +20,8 @@ type TunnelConfig struct {
 }
 
 type TransportInfo struct {
-	DataAddr string `json:"data_addr"`
+	DataAddr   string `json:"data_addr"`
+	TLSEnabled bool   `json:"tls_enabled"`
 }
 
 type Policy struct {
@@ -98,9 +99,7 @@ func DefaultPolicy() Policy {
 		Routes: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
 		DNS:    []string{"1.1.1.1", "8.8.8.8"},
 		Tunnel: TunnelConfig{
-			ClientAddress: "10.200.0.2/24",
-			ServerAddress: "10.200.0.1",
-			MTU:           1380,
+			MTU: 1380,
 		},
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -151,12 +150,6 @@ func NormalizePolicy(policy Policy) Policy {
 	}
 	policy.Routes = slices.Clone(policy.Routes)
 	policy.DNS = slices.Clone(policy.DNS)
-	if policy.Tunnel.ClientAddress == "" {
-		policy.Tunnel.ClientAddress = "10.200.0.2/24"
-	}
-	if policy.Tunnel.ServerAddress == "" {
-		policy.Tunnel.ServerAddress = "10.200.0.1"
-	}
 	if policy.Tunnel.MTU <= 0 {
 		policy.Tunnel.MTU = 1380
 	}

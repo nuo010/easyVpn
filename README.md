@@ -31,6 +31,8 @@ It does not yet implement traffic obfuscation or censorship-evasion behavior.
 - route policy model
 - route plan generation and Linux route sync
 - Linux TUN data plane scaffold for client/server packet bridging
+- automatic client tunnel IP allocation from the server pool
+- optional TLS on the data plane plus local certificate generation
 
 ## Quick start
 
@@ -42,6 +44,9 @@ It does not yet implement traffic obfuscation or censorship-evasion behavior.
   "admin_bind": ":8080",
   "admin_token": "change-me",
   "enable_tunnel": false,
+  "data_tls": false,
+  "data_tls_cert_file": "./server-cert.pem",
+  "data_tls_key_file": "./server-key.pem",
   "public_data_addr": "127.0.0.1:8443",
   "tunnel_name": "easyvpn0",
   "tunnel_address": "10.200.0.1/24",
@@ -55,7 +60,6 @@ It does not yet implement traffic obfuscation or censorship-evasion behavior.
         "routes": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
         "dns": ["1.1.1.1", "8.8.8.8"],
         "tunnel": {
-          "client_address": "10.200.0.2/24",
           "server_address": "10.200.0.1",
           "mtu": 1380
         }
@@ -85,13 +89,24 @@ Open `http://127.0.0.1:8080` in a browser.
   "node_name": "my-laptop",
   "enable_tunnel": false,
   "tunnel_name": "easyvpn0",
-  "apply_system_routes": false
+  "apply_system_routes": false,
+  "data_tls_ca_file": "./server-cert.pem",
+  "data_tls_server_name": "127.0.0.1",
+  "data_tls_insecure_skip_verify": false
 }
 ```
 
 Save as `client.json`, or just use `examples/client.json`.
 
-### 4. Start client
+### 4. Optional: before enabling `data_tls`, generate a data-plane certificate
+
+```bash
+go run ./cmd/easyvpn-cert -cert ./server-cert.pem -key ./server-key.pem -ip 127.0.0.1
+```
+
+If you plan to enable `data_tls`, do this before starting the server. For local self-signed testing, keep `data_tls_ca_file` on the client pointing at the same certificate file.
+
+### 5. Start client
 
 ```bash
 go run ./cmd/easyvpn-client -config ./client.json
@@ -116,6 +131,8 @@ Examples:
 - `tunnel.server_address`: server-side tunnel IP, for example `10.200.0.1`
 - `tunnel.mtu`: target tunnel MTU
 
+If `tunnel.client_address` is left empty in a user policy, the server allocates one automatically from the `tunnel_address` subnet.
+
 ## Route application
 
 - By default, the client only logs the generated route plan.
@@ -129,9 +146,17 @@ Examples:
 - The server writes client packets into the server TUN device and routes return packets back to the matching client by destination tunnel IP.
 - This is the minimum user-space L3 tunnel path; it still depends on Linux network configuration outside the Go process.
 
+## Data plane TLS
+
+- Set `data_tls = true` on the server to require TLS on the packet tunnel listener.
+- Provide `data_tls_cert_file` and `data_tls_key_file` on the server.
+- On the client, set `data_tls_ca_file` to a PEM file that trusts the server certificate.
+- Use `data_tls_server_name` when the certificate should be validated against a specific DNS name or IP.
+- `data_tls_insecure_skip_verify = true` exists only as a local testing escape hatch; keep it `false` in real deployments.
+
 ## Current limitation
 
-The current tunnel path is Linux-only and uses a simple TCP packet stream. It does not yet provide TLS, multiplexing, persistence, automatic IP allocation, or automatic server-side NAT/firewall setup.
+The current tunnel path is Linux-only and uses a simple framed TCP stream. TLS now protects the data path when enabled, but the project still does not provide multiplexing, persistence beyond in-memory sessions, or automatic server-side NAT/firewall setup.
 
 ## Linux notes
 
@@ -142,8 +167,6 @@ The current tunnel path is Linux-only and uses a simple TCP packet stream. It do
 
 The current codebase intentionally separates control plane and data plane so that we can later add:
 
-- TLS or Noise-style transport security
-- automatic IP allocation
 - automatic server-side NAT setup
 - persistent storage
 - peer key management

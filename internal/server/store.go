@@ -9,14 +9,20 @@ import (
 	"easyvpn/internal/control"
 )
 
+const stalePeerAfter = 45 * time.Second
+
 type Store struct {
-	mu       sync.RWMutex
-	users    map[string]control.User
-	peers    map[string]control.Peer
-	sessions map[string]string
+	mu            sync.RWMutex
+	users         map[string]control.User
+	peers         map[string]control.Peer
+	sessions      map[string]string
+	peerSessions  map[string]string
+	ipAllocator   *IPAllocator
+	serverAddress string
+	tunnelMTU     int
 }
 
-func NewStore(users []control.User) *Store {
+func NewStore(users []control.User, allocator *IPAllocator, serverAddress string, tunnelMTU int) *Store {
 	userMap := make(map[string]control.User, len(users))
 	for _, user := range users {
 		normalized := user
@@ -25,9 +31,13 @@ func NewStore(users []control.User) *Store {
 	}
 
 	return &Store{
-		users:    userMap,
-		peers:    make(map[string]control.Peer),
-		sessions: make(map[string]string),
+		users:         userMap,
+		peers:         make(map[string]control.Peer),
+		sessions:      make(map[string]string),
+		peerSessions:  make(map[string]string),
+		ipAllocator:   allocator,
+		serverAddress: serverAddress,
+		tunnelMTU:     tunnelMTU,
 	}
 }
 
@@ -42,27 +52,38 @@ func (s *Store) Authenticate(username, password string) (control.User, bool) {
 	return user, true
 }
 
-func (s *Store) LoginClient(username, nodeName string) (control.User, control.Peer, string) {
+func (s *Store) LoginClient(username, nodeName string) (control.User, control.Peer, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	user := s.users[username]
+	s.removeStalePeersLocked()
+	s.evictDuplicatePeerLocked(username, nodeName)
+
+	peerID := randomID()
+	clientAddress, err := s.ipAllocator.Allocate(peerID, user.Policy.Tunnel.ClientAddress)
+	if err != nil {
+		return control.User{}, control.Peer{}, "", err
+	}
+
+	policy := s.buildPeerPolicyLocked(user.Policy, clientAddress)
 	now := time.Now().UTC()
 	peer := control.Peer{
-		ID:           randomID(),
+		ID:           peerID,
 		Name:         nodeName,
 		Username:     username,
 		Status:       "online",
 		RegisteredAt: now,
 		LastSeenAt:   now,
-		Policy:       user.Policy,
+		Policy:       policy,
 	}
 	s.peers[peer.ID] = peer
 
 	sessionToken := randomID() + randomID()
 	s.sessions[sessionToken] = peer.ID
+	s.peerSessions[peer.ID] = sessionToken
 
-	return user, peer, sessionToken
+	return user, peer, sessionToken, nil
 }
 
 func (s *Store) TouchSession(sessionToken string) (control.Peer, bool) {
@@ -82,7 +103,7 @@ func (s *Store) TouchSession(sessionToken string) (control.Peer, bool) {
 
 	user, ok := s.users[peer.Username]
 	if ok {
-		peer.Policy = user.Policy
+		peer.Policy = s.buildPeerPolicyLocked(user.Policy, peer.Policy.Tunnel.ClientAddress)
 	}
 	peer.LastSeenAt = time.Now().UTC()
 	peer.Status = "online"
@@ -108,7 +129,7 @@ func (s *Store) ListPeers() []control.Peer {
 
 	out := make([]control.Peer, 0, len(s.peers))
 	for _, peer := range s.peers {
-		if time.Since(peer.LastSeenAt) > 45*time.Second {
+		if time.Since(peer.LastSeenAt) > stalePeerAfter {
 			peer.Status = "stale"
 		}
 		out = append(out, peer)
@@ -162,7 +183,7 @@ func (s *Store) UpdateUserPolicy(username string, policy control.Policy) (contro
 		if peer.Username != username {
 			continue
 		}
-		peer.Policy = user.Policy
+		peer.Policy = s.buildPeerPolicyLocked(user.Policy, peer.Policy.Tunnel.ClientAddress)
 		s.peers[id] = peer
 	}
 
@@ -176,4 +197,52 @@ func randomID() string {
 		return time.Now().UTC().Format("20060102150405")
 	}
 	return hex.EncodeToString(buf)
+}
+
+func (s *Store) buildPeerPolicyLocked(base control.Policy, clientAddress string) control.Policy {
+	policy := control.NormalizePolicy(base)
+	policy.Tunnel.ClientAddress = clientAddress
+	if policy.Tunnel.ServerAddress == "" {
+		policy.Tunnel.ServerAddress = s.serverAddress
+	}
+	if policy.Tunnel.MTU <= 0 {
+		policy.Tunnel.MTU = s.tunnelMTU
+	}
+	return policy
+}
+
+func (s *Store) evictDuplicatePeerLocked(username, nodeName string) {
+	for peerID, peer := range s.peers {
+		if peer.Username != username || peer.Name != nodeName {
+			continue
+		}
+		s.removePeerLocked(peerID)
+		return
+	}
+}
+
+func (s *Store) removePeerLocked(peerID string) {
+	peer, ok := s.peers[peerID]
+	if !ok {
+		return
+	}
+
+	if sessionToken, ok := s.peerSessions[peerID]; ok {
+		delete(s.sessions, sessionToken)
+		delete(s.peerSessions, peerID)
+	}
+	if s.ipAllocator != nil {
+		s.ipAllocator.Release(peerID, peer.Policy.Tunnel.ClientAddress)
+	}
+	delete(s.peers, peerID)
+}
+
+func (s *Store) removeStalePeersLocked() {
+	now := time.Now().UTC()
+	for peerID, peer := range s.peers {
+		if now.Sub(peer.LastSeenAt) <= stalePeerAfter {
+			continue
+		}
+		s.removePeerLocked(peerID)
+	}
 }

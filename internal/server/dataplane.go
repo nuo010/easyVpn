@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -49,20 +50,21 @@ func (d *DataPlane) Start() error {
 	}
 	d.tun = device
 
+	listener, err := d.listen()
+	if err != nil {
+		_ = device.Close()
+		return err
+	}
+
 	go d.tunReadLoop()
-	go d.acceptLoop()
+	go d.acceptLoop(listener)
 	return nil
 }
 
-func (d *DataPlane) acceptLoop() {
-	listener, err := net.Listen("tcp", d.cfg.Listen)
-	if err != nil {
-		log.Printf("data plane listener failed: %v", err)
-		return
-	}
+func (d *DataPlane) acceptLoop(listener net.Listener) {
 	defer listener.Close()
 
-	log.Printf("easyVpn data plane listening on %s", d.cfg.Listen)
+	log.Printf("easyVpn data plane listening on %s tls=%v", d.cfg.Listen, d.cfg.DataTLSEnabled)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -71,6 +73,18 @@ func (d *DataPlane) acceptLoop() {
 		}
 		go d.handleConn(conn)
 	}
+}
+
+func (d *DataPlane) listen() (net.Listener, error) {
+	if !d.cfg.DataTLSEnabled {
+		return net.Listen("tcp", d.cfg.Listen)
+	}
+
+	tlsConfig, err := transport.LoadServerTLSConfig(d.cfg.DataTLSCertFile, d.cfg.DataTLSKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	return tls.Listen("tcp", d.cfg.Listen, tlsConfig)
 }
 
 func (d *DataPlane) handleConn(raw net.Conn) {

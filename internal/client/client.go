@@ -26,7 +26,7 @@ type Client struct {
 	peerID       string
 	sessionToken string
 	username     string
-	dataAddr     string
+	transport    control.TransportInfo
 	policy       control.Policy
 }
 
@@ -79,7 +79,7 @@ func (c *Client) login() error {
 	c.peerID = resp.PeerID
 	c.sessionToken = resp.SessionToken
 	c.username = resp.Username
-	c.dataAddr = resp.Transport.DataAddr
+	c.transport = resp.Transport
 	c.policy = control.NormalizePolicy(resp.Policy)
 	return nil
 }
@@ -98,10 +98,10 @@ func (c *Client) heartbeat() error {
 	}
 
 	nextPolicy := control.NormalizePolicy(resp.Policy)
-	nextDataAddr := resp.Transport.DataAddr
-	if !control.PoliciesEqual(c.policy, nextPolicy) || c.dataAddr != nextDataAddr {
+	nextTransport := resp.Transport
+	if !control.PoliciesEqual(c.policy, nextPolicy) || c.transport != nextTransport {
 		c.policy = nextPolicy
-		c.dataAddr = nextDataAddr
+		c.transport = nextTransport
 		if err := c.syncPolicy("heartbeat update"); err != nil {
 			return err
 		}
@@ -184,7 +184,7 @@ func firstNonLoopbackIPv4() string {
 }
 
 func (c *Client) syncPolicy(source string) error {
-	nextPlan := BuildRoutePlan(c.policy, c.dataAddr, c.cfg.TunnelName)
+	nextPlan := BuildRoutePlan(c.policy, c.transport.DataAddr, c.cfg.TunnelName)
 	if RoutePlansEqual(c.routePlan, nextPlan) {
 		return c.syncDataPlane()
 	}
@@ -204,11 +204,11 @@ func (c *Client) syncDataPlane() error {
 
 	if c.dataPlane == nil {
 		dataPlane := NewDataPlane(c.cfg, c.peerID, c.sessionToken)
-		if err := dataPlane.Start(c.dataAddr, c.policy); err != nil {
+		if err := dataPlane.Start(c.transport, c.policy); err != nil {
 			return err
 		}
 		c.dataPlane = dataPlane
 		return nil
 	}
-	return c.dataPlane.Update(c.dataAddr, c.policy)
+	return c.dataPlane.Update(c.transport, c.policy)
 }

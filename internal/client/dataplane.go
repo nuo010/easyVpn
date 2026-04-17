@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -19,7 +20,7 @@ type DataPlane struct {
 	sessionToken string
 
 	mu        sync.RWMutex
-	dataAddr  string
+	transport control.TransportInfo
 	policy    control.Policy
 	current   *transport.FramedConn
 	currentRW net.Conn
@@ -35,11 +36,11 @@ func NewDataPlane(cfg config.ClientConfig, peerID, sessionToken string) *DataPla
 	}
 }
 
-func (d *DataPlane) Start(dataAddr string, policy control.Policy) error {
+func (d *DataPlane) Start(transportInfo control.TransportInfo, policy control.Policy) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.dataAddr = dataAddr
+	d.transport = transportInfo
 	d.policy = policy
 	if d.started {
 		return d.configureLocked()
@@ -62,12 +63,12 @@ func (d *DataPlane) Start(dataAddr string, policy control.Policy) error {
 	return nil
 }
 
-func (d *DataPlane) Update(dataAddr string, policy control.Policy) error {
+func (d *DataPlane) Update(transportInfo control.TransportInfo, policy control.Policy) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	dataAddrChanged := d.dataAddr != dataAddr
-	d.dataAddr = dataAddr
+	dataAddrChanged := d.transport.DataAddr != transportInfo.DataAddr || d.transport.TLSEnabled != transportInfo.TLSEnabled
+	d.transport = transportInfo
 	d.policy = policy
 
 	if !d.started {
@@ -115,13 +116,13 @@ func (d *DataPlane) connectionLoop() {
 	backoff := time.Second
 	for {
 		snapshot := d.snapshot()
-		if snapshot.dataAddr == "" {
+		if snapshot.transport.DataAddr == "" {
 			log.Printf("data plane waiting for server data address")
 			time.Sleep(backoff)
 			continue
 		}
 
-		conn, framed, err := d.connect(snapshot.dataAddr)
+		conn, framed, err := d.connect(snapshot.transport)
 		if err != nil {
 			log.Printf("data plane connect failed: %v", err)
 			time.Sleep(backoff)
@@ -133,7 +134,7 @@ func (d *DataPlane) connectionLoop() {
 
 		backoff = time.Second
 		d.setConn(conn, framed)
-		log.Printf("data plane connected to %s", snapshot.dataAddr)
+		log.Printf("data plane connected to %s tls=%v", snapshot.transport.DataAddr, snapshot.transport.TLSEnabled)
 
 		if err := d.connReadLoop(framed); err != nil {
 			log.Printf("data plane connection closed: %v", err)
@@ -158,8 +159,8 @@ func (d *DataPlane) connReadLoop(conn *transport.FramedConn) error {
 	}
 }
 
-func (d *DataPlane) connect(dataAddr string) (net.Conn, *transport.FramedConn, error) {
-	conn, err := net.DialTimeout("tcp", dataAddr, 10*time.Second)
+func (d *DataPlane) connect(transportInfo control.TransportInfo) (net.Conn, *transport.FramedConn, error) {
+	conn, err := d.dialData(transportInfo)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -189,6 +190,24 @@ func (d *DataPlane) connect(dataAddr string) (net.Conn, *transport.FramedConn, e
 	return conn, framed, nil
 }
 
+func (d *DataPlane) dialData(transportInfo control.TransportInfo) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if !transportInfo.TLSEnabled {
+		return dialer.Dial("tcp", transportInfo.DataAddr)
+	}
+
+	tlsConfig, err := transport.LoadClientTLSConfig(
+		d.cfg.DataTLSCAFile,
+		d.cfg.DataTLSServerName,
+		d.cfg.DataTLSInsecureSkipVerify,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return tls.DialWithDialer(dialer, "tcp", transportInfo.DataAddr, tlsConfig)
+}
+
 func (d *DataPlane) getConn() *transport.FramedConn {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -216,13 +235,13 @@ func (d *DataPlane) clearConn(conn *transport.FramedConn) {
 }
 
 type dataPlaneSnapshot struct {
-	dataAddr string
+	transport control.TransportInfo
 }
 
 func (d *DataPlane) snapshot() dataPlaneSnapshot {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return dataPlaneSnapshot{
-		dataAddr: d.dataAddr,
+		transport: d.transport,
 	}
 }

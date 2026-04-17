@@ -6,6 +6,9 @@
   "enable_tunnel": false,
   "tunnel_name": "easyvpn0",
   "apply_system_routes": false,
+  "data_tls_ca_file": "./server-cert.pem",
+  "data_tls_server_name": "127.0.0.1",
+  "data_tls_insecure_skip_verify": false,
   "poll_interval": 10000000000,
   "heartbeat_interval": 15000000000
 }
