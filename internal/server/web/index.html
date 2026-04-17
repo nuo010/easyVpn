@@ -188,7 +188,7 @@
     <section class="hero">
       <div class="hero-card">
         <h1>easyVpn Console</h1>
-        <p class="subtitle">一个轻量、直接、便于自己维护的 Go 私有隧道控制台。当前版本包含节点注册、心跳、策略下发，以及“全量走服务端 / 按网段分流”的管理能力。</p>
+        <p class="subtitle">一个轻量、直接、便于自己维护的 Go 私有隧道控制台。当前版本采用“客户端输入服务端地址和账号密码登录，服务端按用户下发配置和路由”的主流程。</p>
         <div class="stats">
           <div class="stat">
             <small>在线节点</small>
@@ -208,12 +208,13 @@
 
     <section class="grid">
       <div class="panel">
-        <h2>节点</h2>
-        <p class="hint">选择一个节点后，可以在右侧编辑它的路由策略。</p>
-        <div id="emptyState" class="empty">还没有客户端注册。先启动 `easyvpn-client`，然后刷新页面。</div>
+        <h2>在线客户端</h2>
+        <p class="hint">这里展示当前登录成功并持续心跳的客户端实例，一个用户可以对应多个客户端节点。</p>
+        <div id="emptyState" class="empty">还没有客户端登录。先启动 `easyvpn-client`，输入账号密码后再刷新页面。</div>
         <table id="peerTable" hidden>
           <thead>
             <tr>
+              <th>用户</th>
               <th>节点</th>
               <th>状态</th>
               <th>模式</th>
@@ -226,13 +227,13 @@
       </div>
 
       <div class="panel">
-        <h2>策略</h2>
-        <p class="hint">支持两种模式：`full` 代表所有流量走服务端；`split` 代表只有指定 CIDR 网段走隧道。</p>
+        <h2>用户策略</h2>
+        <p class="hint">客户端登录成功后，会按所属用户拉取策略。支持两种模式：`full` 代表所有流量走服务端；`split` 代表只有指定 CIDR 网段走隧道。</p>
         <label for="adminToken">管理 Token</label>
         <input id="adminToken" placeholder="如果服务端配置了 admin_token，就填这里">
 
-        <label for="peerSelect">目标节点</label>
-        <select id="peerSelect"></select>
+        <label for="userSelect">目标用户</label>
+        <select id="userSelect"></select>
 
         <label for="mode">模式</label>
         <select id="mode">
@@ -246,6 +247,15 @@
         <label for="dns">DNS</label>
         <textarea id="dns" placeholder="每行一个 DNS 地址，例如 1.1.1.1"></textarea>
 
+        <label for="clientAddress">客户端虚拟地址</label>
+        <input id="clientAddress" placeholder="例如 10.200.0.2/24">
+
+        <label for="serverAddress">服务端虚拟地址</label>
+        <input id="serverAddress" placeholder="例如 10.200.0.1">
+
+        <label for="mtu">MTU</label>
+        <input id="mtu" type="number" min="576" max="9000" placeholder="例如 1380">
+
         <button id="saveBtn">保存策略</button>
         <div class="footer" id="saveResult">未修改</div>
       </div>
@@ -253,7 +263,7 @@
   </div>
 
   <script>
-    const state = { peers: [] };
+    const state = { peers: [], users: [] };
 
     const el = (id) => document.getElementById(id);
 
@@ -269,7 +279,7 @@
     function renderPeers() {
       const rows = el('peerRows');
       rows.innerHTML = '';
-      const select = el('peerSelect');
+      const select = el('userSelect');
       select.innerHTML = '';
 
       if (!state.peers.length) {
@@ -284,19 +294,31 @@
       for (const peer of state.peers) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
+          <td>${peer.username || '-'}</td>
           <td>${peer.name}</td>
           <td><span class="badge ${peer.status === 'stale' ? 'stale' : ''}">${peer.status}</span></td>
           <td>${peer.policy.mode}</td>
           <td>${new Date(peer.last_seen_at).toLocaleString()}</td>
           <td><code>${peer.id}</code></td>
         `;
-        tr.addEventListener('click', () => loadPolicy(peer.id));
         rows.appendChild(tr);
+      }
+    }
 
+    function renderUsers() {
+      const select = el('userSelect');
+      const current = select.value;
+      select.innerHTML = '';
+
+      for (const user of state.users) {
         const option = document.createElement('option');
-        option.value = peer.id;
-        option.textContent = `${peer.name} (${peer.id})`;
+        option.value = user.username;
+        option.textContent = user.username;
         select.appendChild(option);
+      }
+
+      if (state.users.length) {
+        select.value = current || state.users[0].username;
       }
     }
 
@@ -310,33 +332,58 @@
       el('adminBind').textContent = status.admin_bind;
       el('refreshAt').textContent = new Date().toLocaleTimeString();
       renderPeers();
-      if (state.peers.length) {
-        const selected = el('peerSelect').value || state.peers[0].id;
+      await refreshUsers();
+      if (state.users.length) {
+        const selected = el('userSelect').value || state.users[0].username;
         await loadPolicy(selected);
       }
     }
 
-    async function loadPolicy(peerID) {
-      if (!peerID) return;
-      el('peerSelect').value = peerID;
-      const policy = await fetchJSON(`/api/v1/peers/${peerID}/policy`);
+    async function refreshUsers() {
+      const token = el('adminToken').value;
+      if (!token) {
+        state.users = [];
+        renderUsers();
+        return;
+      }
+      const users = await fetchJSON('/api/v1/users', {
+        headers: { 'X-Admin-Token': token }
+      });
+      state.users = users.users || [];
+      renderUsers();
+    }
+
+    async function loadPolicy(username) {
+      if (!username) return;
+      el('userSelect').value = username;
+      const policy = await fetchJSON(`/api/v1/users/${encodeURIComponent(username)}/policy`, {
+        headers: { 'X-Admin-Token': el('adminToken').value }
+      });
       el('mode').value = policy.mode || 'split';
       el('routes').value = (policy.routes || []).join('\n');
       el('dns').value = (policy.dns || []).join('\n');
-      el('saveResult').textContent = `已加载 ${peerID}`;
+      el('clientAddress').value = policy.tunnel?.client_address || '';
+      el('serverAddress').value = policy.tunnel?.server_address || '';
+      el('mtu').value = policy.tunnel?.mtu || '';
+      el('saveResult').textContent = `已加载用户 ${username}`;
     }
 
     async function savePolicy() {
-      const peerID = el('peerSelect').value;
-      if (!peerID) return;
+      const username = el('userSelect').value;
+      if (!username) return;
 
       const payload = {
         mode: el('mode').value,
         routes: el('routes').value.split('\n').map(v => v.trim()).filter(Boolean),
-        dns: el('dns').value.split('\n').map(v => v.trim()).filter(Boolean)
+        dns: el('dns').value.split('\n').map(v => v.trim()).filter(Boolean),
+        tunnel: {
+          client_address: el('clientAddress').value.trim(),
+          server_address: el('serverAddress').value.trim(),
+          mtu: Number(el('mtu').value || 0)
+        }
       };
 
-      await fetchJSON(`/api/v1/peers/${peerID}/policy`, {
+      await fetchJSON(`/api/v1/users/${encodeURIComponent(username)}/policy`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -349,7 +396,10 @@
       await refresh();
     }
 
-    el('peerSelect').addEventListener('change', (event) => loadPolicy(event.target.value));
+    el('userSelect').addEventListener('change', (event) => loadPolicy(event.target.value));
+    el('adminToken').addEventListener('change', () => refresh().catch(err => {
+      el('saveResult').textContent = `加载失败: ${err.message}`;
+    }));
     el('saveBtn').addEventListener('click', () => savePolicy().catch(err => {
       el('saveResult').textContent = `保存失败: ${err.message}`;
     }));

@@ -2,7 +2,32 @@
   "listen": ":8443",
   "admin_bind": ":8080",
   "admin_token": "change-me",
-  "enrollment_tokens": [
-    "demo-token"
+  "enable_tunnel": false,
+  "public_data_addr": "127.0.0.1:8443",
+  "tunnel_name": "easyvpn0",
+  "tunnel_address": "10.200.0.1/24",
+  "tunnel_mtu": 1380,
+  "users": [
+    {
+      "username": "demo",
+      "password": "demo123",
+      "policy": {
+        "mode": "split",
+        "routes": [
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16"
+        ],
+        "dns": [
+          "1.1.1.1",
+          "8.8.8.8"
+        ],
+        "tunnel": {
+          "client_address": "10.200.0.2/24",
+          "server_address": "10.200.0.1",
+          "mtu": 1380
+        }
+      }
+    }
   ]
 }

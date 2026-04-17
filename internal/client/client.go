@@ -18,10 +18,16 @@ import (
 const version = "0.1.0"
 
 type Client struct {
-	cfg        config.ClientConfig
-	httpClient *http.Client
-	peerID     string
-	policy     control.Policy
+	cfg          config.ClientConfig
+	httpClient   *http.Client
+	routeApplier *RouteApplier
+	routePlan    RoutePlan
+	dataPlane    *DataPlane
+	peerID       string
+	sessionToken string
+	username     string
+	dataAddr     string
+	policy       control.Policy
 }
 
 func New(cfg config.ClientConfig) *Client {
@@ -30,15 +36,18 @@ func New(cfg config.ClientConfig) *Client {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		routeApplier: NewRouteApplier(cfg.ApplySystemRoutes),
 	}
 }
 
 func (c *Client) Run() error {
-	if err := c.register(); err != nil {
+	if err := c.login(); err != nil {
 		return err
 	}
-	log.Printf("registered as peer %s", c.peerID)
-	c.printPolicy()
+	log.Printf("logged in as %s, peer %s", c.username, c.peerID)
+	if err := c.syncPolicy("initial login"); err != nil {
+		return err
+	}
 
 	heartbeatTicker := time.NewTicker(c.cfg.HeartbeatInterval)
 	defer heartbeatTicker.Stop()
@@ -58,35 +67,45 @@ func (c *Client) Run() error {
 	}
 }
 
-func (c *Client) register() error {
-	resp := control.RegisterResponse{}
-	if err := c.post("/api/v1/register", control.RegisterRequest{
-		Token:    c.cfg.EnrollmentToken,
+func (c *Client) login() error {
+	resp := control.LoginResponse{}
+	if err := c.post("/api/v1/login", control.LoginRequest{
+		Username: c.cfg.Username,
+		Password: c.cfg.Password,
 		NodeName: c.cfg.NodeName,
 	}, &resp); err != nil {
-		return fmt.Errorf("register: %w", err)
+		return fmt.Errorf("login: %w", err)
 	}
 	c.peerID = resp.PeerID
-	c.policy = resp.Policy
+	c.sessionToken = resp.SessionToken
+	c.username = resp.Username
+	c.dataAddr = resp.Transport.DataAddr
+	c.policy = control.NormalizePolicy(resp.Policy)
 	return nil
 }
 
 func (c *Client) heartbeat() error {
-	var resp struct {
-		PeerID string         `json:"peer_id"`
-		Policy control.Policy `json:"policy"`
-	}
+	var resp control.HeartbeatResponse
 
 	if err := c.post("/api/v1/heartbeat", control.HeartbeatRequest{
-		PeerID:      c.peerID,
-		Version:     version,
-		ReportedAt:  time.Now().UTC(),
-		LocalIPHint: firstNonLoopbackIPv4(),
+		SessionToken: c.sessionToken,
+		PeerID:       c.peerID,
+		Version:      version,
+		ReportedAt:   time.Now().UTC(),
+		LocalIPHint:  firstNonLoopbackIPv4(),
 	}, &resp); err != nil {
 		return err
 	}
 
-	c.policy = resp.Policy
+	nextPolicy := control.NormalizePolicy(resp.Policy)
+	nextDataAddr := resp.Transport.DataAddr
+	if !control.PoliciesEqual(c.policy, nextPolicy) || c.dataAddr != nextDataAddr {
+		c.policy = nextPolicy
+		c.dataAddr = nextDataAddr
+		if err := c.syncPolicy("heartbeat update"); err != nil {
+			return err
+		}
+	}
 	log.Printf("heartbeat ok; mode=%s routes=%v", c.policy.Mode, c.policy.Routes)
 	return nil
 }
@@ -121,7 +140,15 @@ func (c *Client) post(path string, payload any, target any) error {
 }
 
 func (c *Client) printPolicy() {
-	log.Printf("policy mode=%s routes=%v dns=%v", c.policy.Mode, c.policy.Routes, c.policy.DNS)
+	log.Printf(
+		"policy mode=%s routes=%v dns=%v tunnel.client=%s tunnel.server=%s mtu=%d",
+		c.policy.Mode,
+		c.policy.Routes,
+		c.policy.DNS,
+		c.policy.Tunnel.ClientAddress,
+		c.policy.Tunnel.ServerAddress,
+		c.policy.Tunnel.MTU,
+	)
 }
 
 func (c *Client) printDecisionExamples() {
@@ -154,4 +181,34 @@ func firstNonLoopbackIPv4() string {
 		}
 	}
 	return ""
+}
+
+func (c *Client) syncPolicy(source string) error {
+	nextPlan := BuildRoutePlan(c.policy, c.dataAddr, c.cfg.TunnelName)
+	if RoutePlansEqual(c.routePlan, nextPlan) {
+		return c.syncDataPlane()
+	}
+	if err := c.routeApplier.Sync(c.routePlan, nextPlan); err != nil {
+		return fmt.Errorf("sync routes after %s: %w", source, err)
+	}
+	c.routePlan = nextPlan
+	c.printPolicy()
+	log.Printf("route plan synced after %s: %s", source, nextPlan.Summary())
+	return c.syncDataPlane()
+}
+
+func (c *Client) syncDataPlane() error {
+	if !c.cfg.EnableTunnel {
+		return nil
+	}
+
+	if c.dataPlane == nil {
+		dataPlane := NewDataPlane(c.cfg, c.peerID, c.sessionToken)
+		if err := dataPlane.Start(c.dataAddr, c.policy); err != nil {
+			return err
+		}
+		c.dataPlane = dataPlane
+		return nil
+	}
+	return c.dataPlane.Update(c.dataAddr, c.policy)
 }

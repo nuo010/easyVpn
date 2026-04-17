@@ -5,19 +5,30 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"easyvpn/internal/control"
 )
 
 type ServerConfig struct {
-	Listen           string   `json:"listen"`
-	AdminBind        string   `json:"admin_bind"`
-	AdminToken       string   `json:"admin_token"`
-	EnrollmentTokens []string `json:"enrollment_tokens"`
+	Listen         string         `json:"listen"`
+	AdminBind      string         `json:"admin_bind"`
+	AdminToken     string         `json:"admin_token"`
+	EnableTunnel   bool           `json:"enable_tunnel"`
+	PublicDataAddr string         `json:"public_data_addr"`
+	TunnelName     string         `json:"tunnel_name"`
+	TunnelAddress  string         `json:"tunnel_address"`
+	TunnelMTU      int            `json:"tunnel_mtu"`
+	Users          []control.User `json:"users"`
 }
 
 type ClientConfig struct {
 	ServerURL         string        `json:"server_url"`
-	EnrollmentToken   string        `json:"enrollment_token"`
+	Username          string        `json:"username"`
+	Password          string        `json:"password"`
 	NodeName          string        `json:"node_name"`
+	EnableTunnel      bool          `json:"enable_tunnel"`
+	TunnelName        string        `json:"tunnel_name"`
+	ApplySystemRoutes bool          `json:"apply_system_routes"`
 	PollInterval      time.Duration `json:"poll_interval"`
 	HeartbeatInterval time.Duration `json:"heartbeat_interval"`
 }
@@ -33,6 +44,15 @@ func LoadServerConfig(path string) (ServerConfig, error) {
 	if cfg.AdminBind == "" {
 		cfg.AdminBind = ":8080"
 	}
+	if cfg.TunnelName == "" {
+		cfg.TunnelName = "easyvpn0"
+	}
+	if cfg.TunnelAddress == "" {
+		cfg.TunnelAddress = "10.200.0.1/24"
+	}
+	if cfg.TunnelMTU <= 0 {
+		cfg.TunnelMTU = 1380
+	}
 	return cfg, nil
 }
 
@@ -44,12 +64,18 @@ func LoadClientConfig(path string) (ClientConfig, error) {
 	if cfg.ServerURL == "" {
 		return ClientConfig{}, fmt.Errorf("server_url is required")
 	}
-	if cfg.EnrollmentToken == "" {
-		return ClientConfig{}, fmt.Errorf("enrollment_token is required")
+	if cfg.Username == "" {
+		return ClientConfig{}, fmt.Errorf("username is required")
+	}
+	if cfg.Password == "" {
+		return ClientConfig{}, fmt.Errorf("password is required")
 	}
 	if cfg.NodeName == "" {
 		hostname, _ := os.Hostname()
 		cfg.NodeName = hostname
+	}
+	if cfg.TunnelName == "" {
+		cfg.TunnelName = "easyvpn0"
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 10 * time.Second

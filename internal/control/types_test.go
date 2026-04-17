@@ -26,3 +26,17 @@ func TestEvaluateRouteFullMode(t *testing.T) {
 		t.Fatalf("expected full tunnel mode to force tunnel, got %#v", got)
 	}
 }
+
+func TestPoliciesEqual(t *testing.T) {
+	left := DefaultPolicy()
+	right := DefaultPolicy()
+
+	if !PoliciesEqual(left, right) {
+		t.Fatalf("expected identical policies to be equal")
+	}
+
+	right.DNS = append(right.DNS, "9.9.9.9")
+	if PoliciesEqual(left, right) {
+		t.Fatalf("expected different DNS lists to change equality")
+	}
+}

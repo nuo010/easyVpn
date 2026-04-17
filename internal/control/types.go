@@ -13,34 +13,63 @@ const (
 	ModeFull  Mode = "full"
 )
 
-type Policy struct {
-	Mode        Mode      `json:"mode"`
-	Routes      []string  `json:"routes"`
-	DNS         []string  `json:"dns"`
-	DefaultPeer string    `json:"default_peer"`
-	UpdatedAt   time.Time `json:"updated_at"`
+type TunnelConfig struct {
+	ClientAddress string `json:"client_address"`
+	ServerAddress string `json:"server_address"`
+	MTU           int    `json:"mtu"`
 }
 
-type RegisterRequest struct {
-	Token    string `json:"token"`
+type TransportInfo struct {
+	DataAddr string `json:"data_addr"`
+}
+
+type Policy struct {
+	Mode        Mode         `json:"mode"`
+	Routes      []string     `json:"routes"`
+	DNS         []string     `json:"dns"`
+	DefaultPeer string       `json:"default_peer"`
+	Tunnel      TunnelConfig `json:"tunnel"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+}
+
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password,omitempty"`
+	Policy   Policy `json:"policy"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 	NodeName string `json:"node_name"`
 }
 
-type RegisterResponse struct {
-	PeerID string `json:"peer_id"`
-	Policy Policy `json:"policy"`
+type LoginResponse struct {
+	PeerID       string        `json:"peer_id"`
+	SessionToken string        `json:"session_token"`
+	Username     string        `json:"username"`
+	Policy       Policy        `json:"policy"`
+	Transport    TransportInfo `json:"transport"`
 }
 
 type HeartbeatRequest struct {
-	PeerID      string    `json:"peer_id"`
-	Version     string    `json:"version"`
-	ReportedAt  time.Time `json:"reported_at"`
-	LocalIPHint string    `json:"local_ip_hint"`
+	SessionToken string    `json:"session_token"`
+	PeerID       string    `json:"peer_id"`
+	Version      string    `json:"version"`
+	ReportedAt   time.Time `json:"reported_at"`
+	LocalIPHint  string    `json:"local_ip_hint"`
+}
+
+type HeartbeatResponse struct {
+	PeerID    string        `json:"peer_id"`
+	Policy    Policy        `json:"policy"`
+	Transport TransportInfo `json:"transport"`
 }
 
 type Peer struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
+	Username     string    `json:"username"`
 	Status       string    `json:"status"`
 	RegisteredAt time.Time `json:"registered_at"`
 	LastSeenAt   time.Time `json:"last_seen_at"`
@@ -53,10 +82,26 @@ type RouteDecision struct {
 	Reason      string `json:"reason"`
 }
 
+type DataConnectRequest struct {
+	SessionToken string `json:"session_token"`
+	PeerID       string `json:"peer_id"`
+}
+
+type DataConnectResponse struct {
+	PeerID  string `json:"peer_id"`
+	Message string `json:"message"`
+}
+
 func DefaultPolicy() Policy {
 	return Policy{
-		Mode:      ModeSplit,
-		Routes:    []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+		Mode:   ModeSplit,
+		Routes: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+		DNS:    []string{"1.1.1.1", "8.8.8.8"},
+		Tunnel: TunnelConfig{
+			ClientAddress: "10.200.0.2/24",
+			ServerAddress: "10.200.0.1",
+			MTU:           1380,
+		},
 		UpdatedAt: time.Now().UTC(),
 	}
 }
@@ -105,6 +150,24 @@ func NormalizePolicy(policy Policy) Policy {
 		policy.Mode = ModeSplit
 	}
 	policy.Routes = slices.Clone(policy.Routes)
+	policy.DNS = slices.Clone(policy.DNS)
+	if policy.Tunnel.ClientAddress == "" {
+		policy.Tunnel.ClientAddress = "10.200.0.2/24"
+	}
+	if policy.Tunnel.ServerAddress == "" {
+		policy.Tunnel.ServerAddress = "10.200.0.1"
+	}
+	if policy.Tunnel.MTU <= 0 {
+		policy.Tunnel.MTU = 1380
+	}
 	policy.UpdatedAt = time.Now().UTC()
 	return policy
+}
+
+func PoliciesEqual(a, b Policy) bool {
+	return a.Mode == b.Mode &&
+		a.DefaultPeer == b.DefaultPeer &&
+		a.Tunnel == b.Tunnel &&
+		slices.Equal(a.Routes, b.Routes) &&
+		slices.Equal(a.DNS, b.DNS)
 }
