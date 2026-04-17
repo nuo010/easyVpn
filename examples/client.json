@@ -1,0 +1,7 @@
+{
+  "server_url": "http://127.0.0.1:8080",
+  "enrollment_token": "demo-token",
+  "node_name": "demo-client",
+  "poll_interval": 10000000000,
+  "heartbeat_interval": 15000000000
+}

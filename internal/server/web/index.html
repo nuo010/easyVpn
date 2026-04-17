@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>easyVpn Console</title>
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --panel: rgba(255, 252, 247, 0.92);
+      --panel-strong: #fffaf2;
+      --line: #d8c8ae;
+      --text: #2b241a;
+      --muted: #6e6251;
+      --accent: #146356;
+      --accent-soft: #d9efe8;
+      --warn: #b25538;
+      --shadow: 0 16px 40px rgba(51, 37, 18, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "PingFang SC", "Noto Sans SC", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(20, 99, 86, 0.12), transparent 34%),
+        radial-gradient(circle at right, rgba(178, 85, 56, 0.14), transparent 25%),
+        linear-gradient(135deg, #f7f1e7, #efe5d5 55%, #e4dccd);
+      min-height: 100vh;
+    }
+
+    .shell {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 18px 60px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+
+    .hero-card, .panel {
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(216, 200, 174, 0.7);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-card {
+      padding: 28px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 4rem);
+      letter-spacing: -0.05em;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      max-width: 720px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .stat {
+      padding: 16px;
+      border-radius: 18px;
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+    }
+
+    .stat small {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .stat strong {
+      font-size: 1.4rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 18px;
+    }
+
+    .panel {
+      padding: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid rgba(216, 200, 174, 0.55);
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 0.85rem;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.8rem;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .badge.stale {
+      color: var(--warn);
+      background: rgba(178, 85, 56, 0.12);
+    }
+
+    label {
+      display: block;
+      margin: 14px 0 8px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    input, select, textarea, button {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      font: inherit;
+      background: #fffdf9;
+      color: var(--text);
+    }
+
+    textarea { min-height: 110px; resize: vertical; }
+
+    button {
+      background: var(--accent);
+      color: white;
+      border: 0;
+      margin-top: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .hint, .empty {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    .footer {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+      .shell { padding: 18px 14px 40px; }
+      .hero-card, .panel { border-radius: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-card">
+        <h1>easyVpn Console</h1>
+        <p class="subtitle">一个轻量、直接、便于自己维护的 Go 私有隧道控制台。当前版本包含节点注册、心跳、策略下发，以及“全量走服务端 / 按网段分流”的管理能力。</p>
+        <div class="stats">
+          <div class="stat">
+            <small>在线节点</small>
+            <strong id="peerCount">0</strong>
+          </div>
+          <div class="stat">
+            <small>管理地址</small>
+            <strong id="adminBind">-</strong>
+          </div>
+          <div class="stat">
+            <small>最近刷新</small>
+            <strong id="refreshAt">-</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>节点</h2>
+        <p class="hint">选择一个节点后，可以在右侧编辑它的路由策略。</p>
+        <div id="emptyState" class="empty">还没有客户端注册。先启动 `easyvpn-client`，然后刷新页面。</div>
+        <table id="peerTable" hidden>
+          <thead>
+            <tr>
+              <th>节点</th>
+              <th>状态</th>
+              <th>模式</th>
+              <th>最后心跳</th>
+              <th>Peer ID</th>
+            </tr>
+          </thead>
+          <tbody id="peerRows"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>策略</h2>
+        <p class="hint">支持两种模式：`full` 代表所有流量走服务端；`split` 代表只有指定 CIDR 网段走隧道。</p>
+        <label for="adminToken">管理 Token</label>
+        <input id="adminToken" placeholder="如果服务端配置了 admin_token，就填这里">
+
+        <label for="peerSelect">目标节点</label>
+        <select id="peerSelect"></select>
+
+        <label for="mode">模式</label>
+        <select id="mode">
+          <option value="split">split</option>
+          <option value="full">full</option>
+        </select>
+
+        <label for="routes">分流网段</label>
+        <textarea id="routes" placeholder="每行一个 CIDR，例如 10.0.0.0/8"></textarea>
+
+        <label for="dns">DNS</label>
+        <textarea id="dns" placeholder="每行一个 DNS 地址，例如 1.1.1.1"></textarea>
+
+        <button id="saveBtn">保存策略</button>
+        <div class="footer" id="saveResult">未修改</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = { peers: [] };
+
+    const el = (id) => document.getElementById(id);
+
+    async function fetchJSON(url, options) {
+      const res = await fetch(url, options);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      return res.json();
+    }
+
+    function renderPeers() {
+      const rows = el('peerRows');
+      rows.innerHTML = '';
+      const select = el('peerSelect');
+      select.innerHTML = '';
+
+      if (!state.peers.length) {
+        el('peerTable').hidden = true;
+        el('emptyState').hidden = false;
+        return;
+      }
+
+      el('peerTable').hidden = false;
+      el('emptyState').hidden = true;
+
+      for (const peer of state.peers) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${peer.name}</td>
+          <td><span class="badge ${peer.status === 'stale' ? 'stale' : ''}">${peer.status}</span></td>
+          <td>${peer.policy.mode}</td>
+          <td>${new Date(peer.last_seen_at).toLocaleString()}</td>
+          <td><code>${peer.id}</code></td>
+        `;
+        tr.addEventListener('click', () => loadPolicy(peer.id));
+        rows.appendChild(tr);
+
+        const option = document.createElement('option');
+        option.value = peer.id;
+        option.textContent = `${peer.name} (${peer.id})`;
+        select.appendChild(option);
+      }
+    }
+
+    async function refresh() {
+      const [status, peers] = await Promise.all([
+        fetchJSON('/api/v1/status'),
+        fetchJSON('/api/v1/peers')
+      ]);
+      state.peers = peers.peers || [];
+      el('peerCount').textContent = state.peers.length;
+      el('adminBind').textContent = status.admin_bind;
+      el('refreshAt').textContent = new Date().toLocaleTimeString();
+      renderPeers();
+      if (state.peers.length) {
+        const selected = el('peerSelect').value || state.peers[0].id;
+        await loadPolicy(selected);
+      }
+    }
+
+    async function loadPolicy(peerID) {
+      if (!peerID) return;
+      el('peerSelect').value = peerID;
+      const policy = await fetchJSON(`/api/v1/peers/${peerID}/policy`);
+      el('mode').value = policy.mode || 'split';
+      el('routes').value = (policy.routes || []).join('\n');
+      el('dns').value = (policy.dns || []).join('\n');
+      el('saveResult').textContent = `已加载 ${peerID}`;
+    }
+
+    async function savePolicy() {
+      const peerID = el('peerSelect').value;
+      if (!peerID) return;
+
+      const payload = {
+        mode: el('mode').value,
+        routes: el('routes').value.split('\n').map(v => v.trim()).filter(Boolean),
+        dns: el('dns').value.split('\n').map(v => v.trim()).filter(Boolean)
+      };
+
+      await fetchJSON(`/api/v1/peers/${peerID}/policy`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': el('adminToken').value
+        },
+        body: JSON.stringify(payload)
+      });
+
+      el('saveResult').textContent = `保存成功 ${new Date().toLocaleTimeString()}`;
+      await refresh();
+    }
+
+    el('peerSelect').addEventListener('change', (event) => loadPolicy(event.target.value));
+    el('saveBtn').addEventListener('click', () => savePolicy().catch(err => {
+      el('saveResult').textContent = `保存失败: ${err.message}`;
+    }));
+
+    refresh().catch(err => {
+      el('saveResult').textContent = `加载失败: ${err.message}`;
+    });
+    setInterval(() => refresh().catch(() => {}), 5000);
+  </script>
+</body>
+</html>
